@@ -8,7 +8,7 @@ More efficient e4rat file preloader.
    respectively.
 * Compile file with `clang -O3 e4rat-preload-lite.c -o e4rat-preload-lite`
    or `gcc -O3 -std=c99 e4rat-preload-lite.c -o e4rat-preload-lite`.
-* Strip binary: `strip -s ./e4rat-preload-lite`
+* Strip binary: `strip -s ./e4rat-preload-lite`.
 * Copy init file to /sbin/e4rat-preload-lite:
   `cp ./e4rat-preload-lite /sbin/`.
 * Add `init=/sbin/e4rat-preload-lite` to kernel line in your bootloader
