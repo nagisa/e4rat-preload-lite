@@ -21,16 +21,20 @@
 #define BUF 1048576 // = 1 MiB
 
 typedef struct {
-    int n, dev;
+    int dev;
     uint64_t inode;
     char *path;
 } FileDesc;
 
-static FileDesc **list = 0;
-static FileDesc **sorted = 0;
+static FileDesc **list = NULL;
+static FileDesc **sorted = NULL;
 static int listlen = 0;
 
+char *strdup(const char *source);
+
+
 static int sort_cb(const void *_a, const void *_b){
+    // qsort helper for file list entries. Sorts by device and inode.
     FileDesc *a = *(FileDesc **)_a;
     FileDesc *b = *(FileDesc **)_b;
 
@@ -49,14 +53,37 @@ static int sort_cb(const void *_a, const void *_b){
     return 0;
 }
 
-static FileDesc *parse_line(int n, const char *line){
+
+static void die(const char *msg){
+    printf("Error: %s.\n", msg);
+    exit(EXIT_FAILURE);
+}
+
+
+static void free_list(FileDesc **list){
+    for (int i = 0; i < listlen; i++) {
+        free(list[i]->path);
+        free(list[i]);
+    }
+    free(list);
+    list = NULL;
+}
+
+
+static FileDesc *parse_line(const char *line){
+    // Parses a line from the file list. Returns NULL in case of parse errors.
+    // Expected format of the line:
+    //     (device) (inode) (path)
+    // Example:
+    //     2049 2223875 /bin/bash
     int dev = 0;
 
     while(*line >= '0' && *line <= '9'){
         dev = dev * 10 + (*line++ - '0');
     }
+
     if(*line++ != ' '){
-        return 0;
+        return NULL;
     }
 
     uint64_t inode = 0;
@@ -64,30 +91,30 @@ static FileDesc *parse_line(int n, const char *line){
         inode = inode * 10 + ((*line++) - '0');
     }
     if(*line++ != ' '){
-        return 0;
+        return NULL;
     }
 
     FileDesc *f = malloc(sizeof(FileDesc));
-    f->n = n;
+    if(!f) die("Failed to allocate memory while parsing file list!");
     f->dev = dev;
     f->inode = inode;
     f->path = strdup(line);
+    if(!f->path) die("Failed to allocate memory for file path");
 
     return f;
 }
 
+
 static void load_list(void){
+    // Loads list and parses contents into FileDescs
     #if VERBOSE > 0
         printf("Loading %s.\n", LIST);
     #endif
 
     FILE *stream = fopen(LIST, "r");
-    int listsize = 0;
-    if (!stream) {
-        printf("Error: %s.\n", strerror(errno));
-        exit(EXIT_FAILURE);
-    }
+    if (!stream) die(strerror(errno));
 
+    int listsize = 0;
     while(1){
         char buf[512];
         if(!fgets(buf, sizeof buf, stream)){
@@ -96,7 +123,7 @@ static void load_list(void){
         if(buf[0] && buf[strlen(buf) - 1] == '\n'){
             buf[strlen (buf) - 1] = 0;
         }
-        FileDesc *f = parse_line(listlen, buf);
+        FileDesc *f = parse_line(buf);
         if(!f){
             continue;
         }
@@ -106,23 +133,23 @@ static void load_list(void){
         }
         list[listlen++] = f;
     }
-
     fclose(stream);
 
     list = realloc(list, sizeof(FileDesc *) * listlen);
     sorted = malloc(sizeof(FileDesc *) * listlen);
+    if(!list || !sorted) die("Could not allocate memory for lists");
     memcpy(sorted, list, sizeof(FileDesc *) * listlen);
     qsort(sorted, listlen, sizeof(FileDesc *), sort_cb);
 }
 
-static void load_inodes(int a, int b){
+
+static void load_inodes(const int a, const int b){
     struct stat s;
-    for(int i = 0; i < listlen; i++){
-        if(sorted[i]->n >= a && sorted[i]->n < b){
-            stat(sorted[i]->path, &s);
-        }
+    for(int i = a; i < ((b < listlen) ? b : listlen); i++){
+        stat(sorted[i]->path, &s);
     }
 }
+
 
 static void exec_init(char **argv){
     #if VERBOSE > 0
@@ -131,19 +158,20 @@ static void exec_init(char **argv){
 
     switch(fork()){
         case -1:
-            printf("Error: %s.\n", strerror(errno));
-            exit(EXIT_FAILURE);
+            die(strerror(errno));
         case 0:
             return;
         default:
             execv(INIT, argv);
-            printf("Error: %s.\n", strerror(errno));
-            exit(EXIT_FAILURE);
+            die(strerror(errno));
     }
 }
 
+
 static void load_files(int a, int b){
     void *buf = malloc(BUF);
+    if(!buf) die("Failed to allocate preload buffer");
+
     for(int i = a; i < b && i < listlen; i ++){
         int handle = open(list[i]->path, O_RDONLY);
         if(handle < 0){
@@ -155,6 +183,7 @@ static void load_files(int a, int b){
     free(buf);
 }
 
+
 int main(int argc, char **argv){
     int early_load = 0;
 
@@ -164,17 +193,21 @@ int main(int argc, char **argv){
     #endif
 
     early_load = listlen * 0.33;
-    if(early_load > MAX_EARLY){
-        early_load = MAX_EARLY;
-    }
+    if(early_load > MAX_EARLY) early_load = MAX_EARLY;
 
+    // Preload a third of the list or MAX_EARLY files (whichever is smaller),
+    // then start init.
     load_inodes(0, early_load);
     load_files(0, early_load);
     exec_init(argv);
 
+    // And continue preloading files further in chunks of BLOCK files.
     for(int i = early_load; i < listlen; i += BLOCK){
         load_inodes(i, i + BLOCK);
         load_files(i, i + BLOCK);
     }
+
+    free_list(sorted);
+    free_list(list);
     exit(EXIT_SUCCESS);
 }
