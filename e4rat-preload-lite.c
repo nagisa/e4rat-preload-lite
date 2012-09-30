@@ -57,6 +57,15 @@ static int sort_cb(const void *_a, const void *_b){
     return 0;
 }
 
+static void free_sorted_file_list() {
+    for (int i = 0; i < listlen; i++) {
+        free(sorted[i]->path);
+	free(sorted[i]);
+    }
+    free(sorted);
+    sorted = NULL;
+}
+
 // Parses a line from the file list. Returns NULL in case of parse errors.
 // Expected format of the line:
 //     (device) (inode) (path)
@@ -128,18 +137,18 @@ static void load_list(void){
 
     fclose(stream);
 
-    list = realloc(list, sizeof(FileDesc *) * listlen);
     sorted = malloc(sizeof(FileDesc *) * listlen);
     if (!list || !sorted){
         die("Failed to allocate memory while loading file list");
     }
     memcpy(sorted, list, sizeof(FileDesc *) * listlen);
     qsort(sorted, listlen, sizeof(FileDesc *), sort_cb);
+    free(list);
 }
 
 static void load_inodes(const int a, const int b){
     struct stat s;
-    for(int i = a; i < (b < listlen) ? b : listlen; i++){
+    for(int i = a; i < ((b < listlen) ? b : listlen); i++){
         stat(sorted[i]->path, &s);
     }
 }
@@ -155,6 +164,7 @@ static void exec_init(char **argv){
         case 0:
             return;
         default:
+            free_sorted_file_list();
             execv(INIT, argv);
             die(strerror(errno));
     }
@@ -201,5 +211,7 @@ int main(int argc, char **argv){
         load_inodes(i, i + BLOCK);
         load_files(i, i + BLOCK);
     }
+
+    free_sorted_file_list();
     exit(EXIT_SUCCESS);
 }
