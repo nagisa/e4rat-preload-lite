@@ -30,8 +30,9 @@ static FileDesc **list = NULL;
 static FileDesc **sorted = NULL;
 static int listlen = 0;
 
+#ifndef strdup
 char *strdup(const char *source);
-
+#endif
 
 static int sort_cb(const void *_a, const void *_b){
     // qsort helper for file list entries. Sorts by device and inode.
