@@ -207,7 +207,9 @@ int main(int argc, char **argv){
         load_files(i, i + BLOCK);
     }
 
-    free_list(sorted);
     free_list(list);
+    // As sorted originally was a copy of list, it's contents are already
+    // freed by the time we are freeing sorted list
+    free(sorted);
     exit(EXIT_SUCCESS);
 }
